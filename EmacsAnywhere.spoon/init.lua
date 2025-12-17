@@ -15,6 +15,7 @@ obj.license = "MIT"
 -- Configuration
 obj.tmpdir = "/tmp/emacs-anywhere"
 obj.emacsclient = "/opt/homebrew/bin/emacsclient"
+obj.yabai = "/opt/homebrew/bin/yabai"
 
 -- State
 obj.previousApp = nil
@@ -34,6 +35,52 @@ function obj:checkIPC()
     return false
   end
   return true
+end
+
+--- EmacsAnywhere:isYabaiRunning()
+--- Method
+--- Check if yabai window manager is running
+function obj:isYabaiRunning()
+  -- Check if yabai binary exists and is running
+  local handle = io.popen(self.yabai .. " -m query --spaces 2>/dev/null")
+  local output = handle:read("*a")
+  handle:close()
+  return output and output ~= "" and output:match("%[")
+end
+
+--- EmacsAnywhere:focusEmacsAnywhereWindow()
+--- Method
+--- Use yabai to focus the emacs-anywhere window
+function obj:focusEmacsAnywhereWindow()
+  -- Query yabai for all windows
+  local cmd = self.yabai .. " -m query --windows"
+  local handle = io.popen(cmd)
+  local output = handle:read("*a")
+  handle:close()
+
+  if not output or output == "" then
+    print("[EmacsAnywhere] Could not query yabai windows")
+    return false
+  end
+
+  -- Parse JSON using Hammerspoon's json module
+  local windows = hs.json.decode(output)
+  if not windows then
+    print("[EmacsAnywhere] Failed to parse yabai window list")
+    return false
+  end
+
+  -- Find the emacs-anywhere window
+  for _, win in ipairs(windows) do
+    if win.title == "emacs-anywhere" then
+      print("[EmacsAnywhere] Focusing window ID: " .. win.id)
+      os.execute(self.yabai .. " -m window --focus " .. win.id)
+      return true
+    end
+  end
+
+  print("[EmacsAnywhere] Could not find emacs-anywhere window")
+  return false
 end
 
 --- EmacsAnywhere:checkServer()
@@ -136,6 +183,36 @@ function obj:start()
     -- Check for actual errors (not just nil return value)
     if output and output:match("ERROR") then
       hs.alert.show("Failed to open Emacs!\n" .. output, 3)
+      return
+    end
+
+    -- Use yabai to focus the emacs-anywhere window (fixes focus issue with yabai)
+    if self:isYabaiRunning() then
+      hs.timer.doAfter(0.1, function()
+        self:focusEmacsAnywhereWindow()
+      end)
+    end
+  end)
+end
+
+--- EmacsAnywhere:abort()
+--- Method
+--- Called by Emacs when editing is aborted. Just refocuses the original app.
+function obj:abort()
+  print("[EmacsAnywhere] Aborting...")
+
+  -- Clean up temp file if it exists
+  if self.currentTmpFile then
+    os.remove(self.currentTmpFile)
+    self.currentTmpFile = nil
+  end
+
+  -- Small delay to ensure Emacs frame is closed
+  hs.timer.doAfter(0.1, function()
+    -- Refocus the original app
+    if self.previousApp then
+      self.previousApp:activate()
+      print("[EmacsAnywhere] Aborted, refocused original app")
     end
   end)
 end

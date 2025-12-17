@@ -116,12 +116,20 @@ MOUSE-X and MOUSE-Y are the cursor position for frame placement."
 (defun emacs-anywhere-abort ()
   "Abort editing without saving."
   (interactive)
-  ;; Just clean up without notifying Hammerspoon
+  ;; Notify Hammerspoon to refocus original app (without pasting)
+  (emacs-anywhere--notify-hammerspoon-abort)
+  ;; Clean up
   (emacs-anywhere--cleanup))
 
 (defun emacs-anywhere--notify-hammerspoon ()
   "Tell Hammerspoon to paste the content back."
   (let ((cmd (format "%s -c 'spoon.EmacsAnywhere:finish()'"
+                     emacs-anywhere-hs-path)))
+    (call-process-shell-command cmd nil 0)))
+
+(defun emacs-anywhere--notify-hammerspoon-abort ()
+  "Tell Hammerspoon to refocus original app without pasting."
+  (let ((cmd (format "%s -c 'spoon.EmacsAnywhere:abort()'"
                      emacs-anywhere-hs-path)))
     (call-process-shell-command cmd nil 0)))
 
