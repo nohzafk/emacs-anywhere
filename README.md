@@ -66,7 +66,7 @@ Grant Accessibility permission: **System Settings → Privacy & Security → Acc
 Clone this repository and symlink (or copy) the Spoon:
 
 ```bash
-git clone https://github.com/randall/emacs-anywhere.git
+git clone https://github.com/nohzafk/emacs-anywhere.git
 ln -s ~/path/to/emacs-anywhere/EmacsAnywhere.spoon ~/.hammerspoon/Spoons/
 ```
 
