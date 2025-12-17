@@ -59,27 +59,23 @@ function obj:focusEmacsAnywhereWindow()
   handle:close()
 
   if not output or output == "" then
-    print("[EmacsAnywhere] Could not query yabai windows")
     return false
   end
 
   -- Parse JSON using Hammerspoon's json module
   local windows = hs.json.decode(output)
   if not windows then
-    print("[EmacsAnywhere] Failed to parse yabai window list")
     return false
   end
 
   -- Find the emacs-anywhere window
   for _, win in ipairs(windows) do
     if win.title == "emacs-anywhere" then
-      print("[EmacsAnywhere] Focusing window ID: " .. win.id)
       os.execute(self.yabai .. " -m window --focus " .. win.id)
       return true
     end
   end
 
-  print("[EmacsAnywhere] Could not find emacs-anywhere window")
   return false
 end
 
@@ -121,9 +117,6 @@ function obj:start()
   -- Save the current application
   self.previousApp = hs.application.frontmostApplication()
   local appName = self.previousApp:name()
-  local appBundleID = self.previousApp:bundleID()
-
-  print("[EmacsAnywhere] Triggered from: " .. appName)
 
   -- Try to get selected text via Accessibility API (no clipboard, no beep)
   local text = ""
@@ -135,12 +128,7 @@ function obj:start()
     local selectedText = focusedElement:attributeValue("AXSelectedText")
     if selectedText and selectedText ~= "" then
       text = selectedText
-      print("[EmacsAnywhere] Got selected text via AX: " .. #text .. " chars")
-    else
-      print("[EmacsAnywhere] No text selected (starting empty)")
     end
-  else
-    print("[EmacsAnywhere] No focused element found (starting empty)")
   end
 
   hs.timer.doAfter(0.05, function()
@@ -174,7 +162,6 @@ function obj:start()
       mouseX,
       mouseY
     )
-    print("[EmacsAnywhere] Running: " .. cmd)
 
     local handle = io.popen(cmd .. " 2>&1")
     local output = handle:read("*a")
@@ -199,8 +186,6 @@ end
 --- Method
 --- Called by Emacs when editing is aborted. Just refocuses the original app.
 function obj:abort()
-  print("[EmacsAnywhere] Aborting...")
-
   -- Clean up temp file if it exists
   if self.currentTmpFile then
     os.remove(self.currentTmpFile)
@@ -212,7 +197,6 @@ function obj:abort()
     -- Refocus the original app
     if self.previousApp then
       self.previousApp:activate()
-      print("[EmacsAnywhere] Aborted, refocused original app")
     end
   end)
 end
@@ -221,12 +205,9 @@ end
 --- Method
 --- Called by Emacs when editing is done. Pastes content back and refocuses.
 function obj:finish()
-  print("[EmacsAnywhere] Finishing...")
-
   -- Read the edited content
   local f = io.open(self.currentTmpFile, "r")
   if not f then
-    print("[EmacsAnywhere] Error: Could not read temp file: " .. tostring(self.currentTmpFile))
     return
   end
   local content = f:read("*all")
@@ -256,7 +237,6 @@ function obj:finish()
           if originalClipboard then
             hs.pasteboard.setContents(originalClipboard)
           end
-          print("[EmacsAnywhere] Done!")
         end)
       end)
     end
