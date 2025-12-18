@@ -91,6 +91,7 @@ spoon.EmacsAnywhere:bindHotkeys({
 - Key: any key name like `"f8"`, `"e"`, `"space"`, etc.
 
 Examples:
+
 ```lua
 toggle = {{"ctrl"}, "f8"}           -- Ctrl+F8
 toggle = {{"cmd", "ctrl"}, "e"}     -- Cmd+Ctrl+E
@@ -100,26 +101,15 @@ toggle = {{"alt"}, "e"}             -- Option+E
 
 Reload Hammerspoon config (`Cmd+Ctrl+R` or from menu).
 
-### 4. Install the Emacs package
+### 4. Start the Emacs server
 
 Add to your Emacs config:
 
 ```elisp
-(add-to-list 'load-path "~/path/to/emacs-anywhere")
-(require 'emacs-anywhere)
-
-;; Make sure server is running
 (server-start)
 ```
 
-Or with `use-package`:
-
-```elisp
-(use-package emacs-anywhere
-  :load-path "~/path/to/emacs-anywhere"
-  :config
-  (server-start))
-```
+That's it! The Spoon automatically loads the elisp when needed.
 
 ## Usage
 
@@ -131,7 +121,7 @@ Or with `use-package`:
 
 The header line shows the target app and available keybindings:
 
-```
+```text
 → Safari  |  C-c C-c: finish  |  C-c C-k: abort
 ```
 
@@ -149,8 +139,10 @@ spoon.EmacsAnywhere.tmpdir = "/tmp/my-emacs-anywhere"
 
 ### Emacs
 
+The elisp is automatically loaded from the Spoon - no need to add anything to your `load-path`. To customize, just set these variables directly in your Emacs config:
+
 ```elisp
-;; Custom frame size and position (position is overridden by mouse location)
+;; Custom frame size (position is overridden by mouse location)
 (setq emacs-anywhere-frame-parameters
       '((name . "emacs-anywhere")
         (width . 80)
@@ -159,6 +151,8 @@ spoon.EmacsAnywhere.tmpdir = "/tmp/my-emacs-anywhere"
 ;; Custom Hammerspoon CLI path (default: /opt/homebrew/bin/hs)
 (setq emacs-anywhere-hs-path "/usr/local/bin/hs")
 ```
+
+These variables will be respected when the elisp is dynamically loaded.
 
 ### Window Manager Integration
 
@@ -182,6 +176,7 @@ Start the Emacs server with `M-x server-start` or add `(server-start)` to your c
 ### Emacs frame doesn't appear
 
 1. Check that `emacsclient` works:
+
    ```bash
    /opt/homebrew/bin/emacsclient -e '(+ 1 1)'  # Should print 2
    ```
@@ -191,6 +186,7 @@ Start the Emacs server with `M-x server-start` or add `(server-start)` to your c
 ### Hammerspoon CLI not working
 
 1. Test it:
+
    ```bash
    hs -c 'hs.alert.show("hello")'
    ```

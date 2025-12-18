@@ -154,9 +154,13 @@ function obj:start()
     local mouseY = math.floor(mousePos.y)
 
     -- Open in Emacs (no -c flag, elisp creates its own frame)
+    -- Dynamically load elisp from Spoon directory
+    local elispFile = hs.spoons.resourcePath("emacs-anywhere.el")
+
     local cmd = string.format(
-      '%s -e \'(emacs-anywhere-open "%s" "%s" %d %d)\'',
+      '%s -e \'(progn (load "%s") (emacs-anywhere-open "%s" "%s" %d %d))\'',
       self.emacsclient,
+      elispFile,
       self.currentTmpFile,
       appName,
       mouseX,
@@ -164,12 +168,19 @@ function obj:start()
     )
 
     local handle = io.popen(cmd .. " 2>&1")
+    if not handle then
+      print("[EmacsAnywhere] Error: Failed to execute emacsclient")
+      hs.alert.show("Failed to execute emacsclient!", 3)
+      return
+    end
+
     local output = handle:read("*a")
     handle:close()
 
-    -- Check for actual errors (not just nil return value)
-    if output and output:match("ERROR") then
-      hs.alert.show("Failed to open Emacs!\n" .. output, 3)
+    -- Check for errors (emacsclient returns error messages on failure)
+    if output and (output:match("error:") or output:match("ERROR") or output:match("Cannot")) then
+      print("[EmacsAnywhere] Error: " .. output:gsub("%s+$", ""))
+      hs.alert.show("Failed to open Emacs!\n" .. output:gsub("%s+$", ""), 3)
       return
     end
 

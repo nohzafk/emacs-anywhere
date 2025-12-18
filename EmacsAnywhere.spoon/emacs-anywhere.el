@@ -10,11 +10,12 @@
 
 ;; Edit text from any macOS application in Emacs via Hammerspoon.
 ;;
-;; Usage:
-;;   1. Install the EmacsAnywhere.spoon in Hammerspoon
-;;   2. Add this package to your Emacs config
-;;   3. Bind a hotkey in Hammerspoon to trigger EmacsAnywhere:start()
-;;   4. Press the hotkey in any app to edit text in Emacs
+;; This file is bundled with EmacsAnywhere.spoon and loaded automatically.
+;; No Emacs configuration needed beyond (server-start).
+;;
+;; To customize, set variables in your Emacs config before triggering:
+;;   (setq emacs-anywhere-hs-path "/usr/local/bin/hs")
+;;   (setq emacs-anywhere-frame-parameters '((width . 100) (height . 30)))
 
 ;;; Code:
 
