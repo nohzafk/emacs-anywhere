@@ -16,6 +16,10 @@
 ;; To customize, set variables in your Emacs config before triggering:
 ;;   (setq emacs-anywhere-hs-path "/usr/local/bin/hs")
 ;;   (setq emacs-anywhere-frame-parameters '((width . 100) (height . 30)))
+;;   (setq emacs-anywhere-major-mode #'markdown-mode)
+;;
+;; Use `emacs-anywhere-mode-hook' for further buffer customization:
+;;   (add-hook 'emacs-anywhere-mode-hook #'flyspell-mode)
 
 ;;; Code:
 
@@ -39,6 +43,11 @@
   :type 'alist
   :group 'emacs-anywhere)
 
+(defcustom emacs-anywhere-major-mode #'text-mode
+  "Major mode to use for emacs-anywhere buffers."
+  :type 'function
+  :group 'emacs-anywhere)
+
 (defvar emacs-anywhere--current-file nil
   "The current temp file being edited.")
 
@@ -47,6 +56,26 @@
 
 (defvar emacs-anywhere--source-app nil
   "The app that triggered emacs-anywhere.")
+
+(defvar emacs-anywhere-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'emacs-anywhere-finish)
+    (define-key map (kbd "C-c C-k") #'emacs-anywhere-abort)
+    map)
+  "Keymap for `emacs-anywhere-mode'.")
+
+(define-minor-mode emacs-anywhere-mode
+  "Minor mode for emacs-anywhere buffers.
+Provides keybindings and a hook for customization."
+  :lighter " Anywhere"
+  :keymap emacs-anywhere-mode-map
+  (when emacs-anywhere-mode
+    ;; Don't add trailing newline - paste back exactly what user typed
+    (setq-local require-final-newline nil)
+    ;; Show help in header line
+    (setq-local header-line-format
+                (format " → %s  |  C-c C-c: finish  |  C-c C-k: abort"
+                        (or emacs-anywhere--source-app "Unknown")))))
 
 (defun emacs-anywhere-open (file &optional app-name mouse-x mouse-y)
   "Open FILE in a new frame for editing.
@@ -78,28 +107,17 @@ MOUSE-X and MOUSE-Y are the cursor position for frame placement."
 
 (defun emacs-anywhere--setup-buffer ()
   "Set up the emacs-anywhere buffer."
-  ;; Use a sensible default mode
-  (when (eq major-mode 'fundamental-mode)
-    (text-mode))
+  (funcall emacs-anywhere-major-mode)
 
   ;; Exclude from recentf (use pattern, not individual filenames)
   (when (bound-and-true-p recentf-mode)
     (add-to-list 'recentf-exclude "^/tmp/emacs-anywhere/"))
 
-  ;; Don't add trailing newline - paste back exactly what user typed
-  (setq-local require-final-newline nil)
-
   ;; Put cursor at end of buffer
   (goto-char (point-max))
 
-  ;; Add keybindings
-  (local-set-key (kbd "C-c C-c") #'emacs-anywhere-finish)
-  (local-set-key (kbd "C-c C-k") #'emacs-anywhere-abort)
-
-  ;; Show help in header line
-  (setq-local header-line-format
-              (format " → %s  |  C-c C-c: finish  |  C-c C-k: abort"
-                      emacs-anywhere--source-app)))
+  ;; Enable minor mode (sets up keybindings, header-line, etc.)
+  (emacs-anywhere-mode 1))
 
 (defun emacs-anywhere-finish ()
   "Save the buffer, notify Hammerspoon, and close the frame."

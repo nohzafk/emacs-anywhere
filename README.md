@@ -150,9 +150,30 @@ The elisp is automatically loaded from the Spoon - no need to add anything to yo
 
 ;; Custom Hammerspoon CLI path (default: /opt/homebrew/bin/hs)
 (setq emacs-anywhere-hs-path "/usr/local/bin/hs")
+
+;; Custom major mode (default: text-mode)
+(setq emacs-anywhere-major-mode #'markdown-mode)
 ```
 
 These variables will be respected when the elisp is dynamically loaded.
+
+#### Buffer customization via hook
+
+Use `emacs-anywhere-mode-hook` to further customize the buffer:
+
+```elisp
+;; Enable spell checking
+(add-hook 'emacs-anywhere-mode-hook #'flyspell-mode)
+
+;; Enable visual line wrapping
+(add-hook 'emacs-anywhere-mode-hook #'visual-line-mode)
+
+;; Multiple customizations
+(add-hook 'emacs-anywhere-mode-hook
+          (lambda ()
+            (setq-local fill-column 72)
+            (auto-fill-mode 1)))
+```
 
 ### Window Manager Integration
 
