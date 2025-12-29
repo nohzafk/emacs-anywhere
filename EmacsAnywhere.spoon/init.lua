@@ -18,9 +18,9 @@ obj.emacsclient = "/opt/homebrew/bin/emacsclient"
 obj.yabai = "/opt/homebrew/bin/yabai"
 
 -- State
-obj.previousApp = nil
 obj.hotkey = nil
-obj.currentTmpFile = nil
+-- Note: previousApp and currentTmpFile are no longer stored globally
+-- They are passed as parameters to support concurrent sessions
 
 -- Seed random generator
 math.randomseed(os.time())
@@ -83,7 +83,7 @@ end
 --- Method
 --- Check if Emacs server is running
 function obj:checkServer()
-  local cmd = self.emacsclient .. " -e '(+ 1 1)' 2>&1"
+  local cmd = "TERM=xterm-256color " .. self.emacsclient .. " -e '(+ 1 1)' 2>&1"
   local handle = io.popen(cmd)
   local output = handle:read("*a")
   handle:close()
@@ -114,9 +114,10 @@ function obj:start()
     return
   end
 
-  -- Save the current application
-  self.previousApp = hs.application.frontmostApplication()
-  local appName = self.previousApp:name()
+  -- Save the current application info
+  local currentApp = hs.application.frontmostApplication()
+  local appName = currentApp:name()
+  local appBundleID = currentApp:bundleID() or appName  -- Fallback to name if no bundle ID
 
   -- Try to get selected text via Accessibility API (no clipboard, no beep)
   local text = ""
@@ -153,36 +154,43 @@ function obj:start()
     local mouseX = math.floor(mousePos.x)
     local mouseY = math.floor(mousePos.y)
 
-    -- Open in Emacs (no -c flag, elisp creates its own frame)
+    -- Open in Emacs (requires daemon or server-mode to be running)
     -- Dynamically load elisp from Spoon directory
     local elispFile = hs.spoons.resourcePath("emacs-anywhere.el")
 
-    local cmd = string.format(
-      '%s -e \'(progn (load "%s") (emacs-anywhere-open "%s" "%s" %d %d))\'',
-      self.emacsclient,
+    -- Build the elisp command that creates the emacs-anywhere frame
+    -- Pass both app name (for display) and bundle ID (for reliable lookup)
+    local elispCmd = string.format(
+      '(progn (load "%s") (emacs-anywhere-open "%s" "%s" "%s" %d %d))',
       elispFile,
       self.currentTmpFile,
       appName,
+      appBundleID,
       mouseX,
       mouseY
     )
 
-    local handle = io.popen(cmd .. " 2>&1")
-    if not handle then
-      print("[EmacsAnywhere] Error: Failed to execute emacsclient")
-      hs.alert.show("Failed to execute emacsclient!", 3)
-      return
-    end
-
-    local output = handle:read("*a")
-    handle:close()
-
-    -- Check for errors (emacsclient returns error messages on failure)
-    if output and (output:match("error:") or output:match("ERROR") or output:match("Cannot")) then
-      print("[EmacsAnywhere] Error: " .. output:gsub("%s+$", ""))
-      hs.alert.show("Failed to open Emacs!\n" .. output:gsub("%s+$", ""), 3)
-      return
-    end
+    -- Run emacsclient asynchronously to support concurrent sessions
+    -- emacsclient options:
+    --   -n (--no-wait): Return immediately, don't wait for frame to close
+    --                   This enables multiple concurrent emacs-anywhere sessions
+    --   -c (--create-frame): Create a new GUI frame (establishes display context)
+    --                        The elisp code configures this frame with custom parameters
+    --   -e (--eval): Evaluate the following elisp expression
+    -- Note: No -a flag - daemon must be running (managed by launchd or user)
+    local task = hs.task.new(
+      self.emacsclient,
+      function(exitCode, stdOut, stdErr)
+        -- Callback when emacsclient completes (non-blocking)
+        if exitCode ~= 0 then
+          local output = stdErr ~= "" and stdErr or stdOut
+          print("[EmacsAnywhere] Error: " .. output:gsub("%s+$", ""))
+          hs.alert.show("Failed to open Emacs!\n" .. output:gsub("%s+$", ""), 3)
+        end
+      end,
+      {"-n", "-c", "-e", elispCmd}
+    )
+    task:start()
 
     -- Use yabai to focus the emacs-anywhere window (fixes focus issue with yabai)
     if self:isYabaiRunning() then
@@ -193,39 +201,47 @@ function obj:start()
   end)
 end
 
---- EmacsAnywhere:abort()
+--- EmacsAnywhere:abort(appBundleID)
 --- Method
 --- Called by Emacs when editing is aborted. Just refocuses the original app.
-function obj:abort()
-  -- Clean up temp file if it exists
-  if self.currentTmpFile then
-    os.remove(self.currentTmpFile)
-    self.currentTmpFile = nil
-  end
-
+--- Parameters:
+---  * appBundleID - Bundle ID of the app to refocus
+function obj:abort(appBundleID)
   -- Small delay to ensure Emacs frame is closed
   hs.timer.doAfter(0.1, function()
-    -- Refocus the original app
-    if self.previousApp then
-      self.previousApp:activate()
+    -- Find and refocus the original app by bundle ID
+    local targetApp = hs.application.get(appBundleID)
+    if targetApp then
+      targetApp:activate()
     end
   end)
 end
 
---- EmacsAnywhere:finish()
+--- EmacsAnywhere:finish(tmpFile, appBundleID)
 --- Method
 --- Called by Emacs when editing is done. Pastes content back and refocuses.
-function obj:finish()
-  -- Read the edited content
-  local f = io.open(self.currentTmpFile, "r")
+--- Parameters:
+---  * tmpFile - Path to the temporary file containing the edited content
+---  * appBundleID - Bundle ID of the app to paste into (e.g., "com.google.Chrome")
+function obj:finish(tmpFile, appBundleID)
+  -- Read the edited content from the specified file
+  local f = io.open(tmpFile, "r")
   if not f then
+    print("[EmacsAnywhere] Error: Could not read temp file: " .. tmpFile)
     return
   end
   local content = f:read("*all")
   f:close()
 
   -- Clean up temp file
-  os.remove(self.currentTmpFile)
+  os.remove(tmpFile)
+
+  -- Find the app by bundle ID (most reliable method)
+  local targetApp = hs.application.get(appBundleID)
+  if not targetApp then
+    print("[EmacsAnywhere] Warning: Could not find app with bundle ID: " .. appBundleID)
+    return
+  end
 
   -- Save original clipboard contents
   local originalClipboard = hs.pasteboard.getContents()
@@ -235,22 +251,20 @@ function obj:finish()
 
   -- Small delay to ensure Emacs frame is closed
   hs.timer.doAfter(0.1, function()
-    -- Refocus the original app
-    if self.previousApp then
-      self.previousApp:activate()
+    -- Refocus the target app
+    targetApp:activate()
 
-      -- Wait for app to focus, then paste
+    -- Wait for app to focus, then paste
+    hs.timer.doAfter(0.1, function()
+      hs.eventtap.keyStroke({ "cmd" }, "v")
+
+      -- Restore original clipboard after paste
       hs.timer.doAfter(0.1, function()
-        hs.eventtap.keyStroke({ "cmd" }, "v")
-
-        -- Restore original clipboard after paste
-        hs.timer.doAfter(0.1, function()
-          if originalClipboard then
-            hs.pasteboard.setContents(originalClipboard)
-          end
-        end)
+        if originalClipboard then
+          hs.pasteboard.setContents(originalClipboard)
+        end
       end)
-    end
+    end)
   end)
 end
 

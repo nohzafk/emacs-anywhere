@@ -15,6 +15,10 @@ Edit text from any macOS application in Emacs.
 5. Press `C-c C-c` to finish - text is pasted back to the original app
 6. Your clipboard is preserved throughout
 
+**Features:**
+- Support opening multiple emacs-anywhere frames concurrently
+- Works with both Emacs daemon mode and GUI Emacs with server-start
+
 ## Why not emacs-everywhere?
 
 [emacs-everywhere](https://github.com/tecosaur/emacs-everywhere) is a great cross-platform solution, but on macOS it relies on AppleScript for system integration. This can lead to:
@@ -47,7 +51,9 @@ The tradeoff is requiring Hammerspoon as a dependency, but if you're on macOS an
 
 - macOS
 - [Hammerspoon](https://www.hammerspoon.org/) (with CLI tool installed)
-- Emacs with server running (`M-x server-start`)
+- Emacs with server running:
+  - Emacs daemon (`emacs --daemon` or via launchd), or
+  - GUI Emacs with server mode (`M-x server-start`)
 
 ## Installation
 
@@ -102,6 +108,20 @@ toggle = {{"alt"}, "e"}             -- Option+E
 Reload Hammerspoon config (`Cmd+Ctrl+R` or from menu).
 
 ### 4. Start the Emacs server
+
+**Option 1: Daemon mode**
+
+Start Emacs as a background daemon:
+
+```bash
+# Manual start
+/Applications/Emacs.app/Contents/MacOS/Emacs --daemon
+
+# Or via launchd (starts at login, auto-restarts)
+# See: https://github.com/nix-community/home-manager/blob/master/modules/launchd/launchd-agents.nix
+```
+
+**Option 2: GUI Emacs with server mode**
 
 Add to your Emacs config:
 
@@ -232,13 +252,26 @@ If Hammerspoon can't read selected text or simulate keystrokes:
 ## How it works (technical details)
 
 1. **Trigger**: Hammerspoon hotkey calls `EmacsAnywhere:start()`
-2. **Capture**: Selected text is read via `AXSelectedText` accessibility attribute
+2. **Capture**: Selected text is read via `AXSelectedText` accessibility attribute, app name and bundle ID are saved
 3. **Temp file**: Text is written to `/tmp/emacs-anywhere/<app>-<timestamp>-<random>.txt`
-4. **Emacs**: `emacsclient -e` evaluates `(emacs-anywhere-open ...)` with file path, app name, and mouse coordinates
-5. **Edit**: Emacs opens a floating frame at the mouse position
-6. **Finish**: `C-c C-c` saves the file, calls `hs -c 'spoon.EmacsAnywhere:finish()'`
-7. **Paste**: Hammerspoon reads the file, saves clipboard, pastes content via `Cmd+V`, restores clipboard
-8. **Cleanup**: Temp file is deleted
+4. **Emacs**: `emacsclient -n -c -e` evaluates `(emacs-anywhere-open ...)` with:
+   - `-n`: Non-blocking, returns immediately (enables concurrent sessions)
+   - `-c`: Creates GUI frame (establishes display context for daemon)
+   - File path, app name (display), bundle ID (lookup), mouse coordinates
+5. **Frame state**: Each frame stores its own state in frame parameters (not global variables)
+6. **Edit**: Emacs configures the frame at mouse position and opens the temp file
+7. **Finish**: `C-c C-c` saves file, calls `hs -c 'spoon.EmacsAnywhere:finish("<file>", "<bundle-id>")'`
+8. **App lookup**: Hammerspoon finds target app by bundle ID (reliable, unique identifier)
+9. **Paste**: Reads file, saves clipboard, pastes content via `Cmd+V`, restores clipboard
+10. **Cleanup**: Temp file and frame are deleted
+
+### Concurrent sessions
+
+Multiple emacs-anywhere sessions can run simultaneously:
+- Each session has its own temp file and frame
+- Frame parameters store session-specific state (file path, app bundle ID)
+- Sessions are independent and don't interfere with each other
+- Closing one session doesn't affect others
 
 ## License
 

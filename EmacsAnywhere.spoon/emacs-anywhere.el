@@ -48,15 +48,6 @@
   :type 'function
   :group 'emacs-anywhere)
 
-(defvar emacs-anywhere--current-file nil
-  "The current temp file being edited.")
-
-(defvar emacs-anywhere--frame nil
-  "The emacs-anywhere frame.")
-
-(defvar emacs-anywhere--source-app nil
-  "The app that triggered emacs-anywhere.")
-
 (defvar emacs-anywhere-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'emacs-anywhere-finish)
@@ -72,38 +63,46 @@ Provides keybindings and a hook for customization."
   (when emacs-anywhere-mode
     ;; Don't add trailing newline - paste back exactly what user typed
     (setq-local require-final-newline nil)
-    ;; Show help in header line
+    ;; Show help in header line (get app from frame parameter)
     (setq-local header-line-format
                 (format " → %s  |  C-c C-c: finish  |  C-c C-k: abort"
-                        (or emacs-anywhere--source-app "Unknown")))))
+                        (or (frame-parameter nil 'emacs-anywhere-app) "Unknown")))))
 
-(defun emacs-anywhere-open (file &optional app-name mouse-x mouse-y)
+(defun emacs-anywhere-open (file &optional app-name app-bundle-id mouse-x mouse-y)
   "Open FILE in a new frame for editing.
-APP-NAME is the name of the source application.
+APP-NAME is the name of the source application (for display).
+APP-BUNDLE-ID is the bundle ID of the source application (for reliable lookup).
 MOUSE-X and MOUSE-Y are the cursor position for frame placement."
-  (setq emacs-anywhere--current-file file)
-  (setq emacs-anywhere--source-app (or app-name "Unknown"))
+  ;; Use the frame created by emacsclient -c (don't create a new one)
+  ;; Just configure it with our desired parameters
+  (let ((frame (selected-frame)))
+    ;; Store state in frame parameters (not global variables) to support concurrent sessions
+    (set-frame-parameter frame 'emacs-anywhere-file file)
+    (set-frame-parameter frame 'emacs-anywhere-app (or app-name "Unknown"))
+    (set-frame-parameter frame 'emacs-anywhere-bundle-id (or app-bundle-id app-name))
 
-  ;; Build frame parameters with position
-  (let ((frame-params (copy-alist emacs-anywhere-frame-parameters)))
+    ;; Set frame parameters (name, size, position)
+    (set-frame-parameter frame 'name "emacs-anywhere")
+    (set-frame-parameter frame 'width
+                         (or (cdr (assq 'width emacs-anywhere-frame-parameters)) 80))
+    (set-frame-parameter frame 'height
+                         (or (cdr (assq 'height emacs-anywhere-frame-parameters)) 20))
     (when mouse-x
-      (setf (alist-get 'left frame-params) mouse-x))
+      (set-frame-parameter frame 'left mouse-x))
     (when mouse-y
-      (setf (alist-get 'top frame-params) mouse-y))
+      (set-frame-parameter frame 'top mouse-y))
 
-    ;; Create a new frame
-    (setq emacs-anywhere--frame (make-frame frame-params)))
-  (select-frame emacs-anywhere--frame)
-  (raise-frame emacs-anywhere--frame)
+    (select-frame frame)
+    (raise-frame frame)
 
-  ;; Open the file
-  (find-file file)
+    ;; Open the file
+    (find-file file)
 
-  ;; Set up the buffer
-  (emacs-anywhere--setup-buffer)
+    ;; Set up the buffer
+    (emacs-anywhere--setup-buffer)
 
-  ;; Focus the frame
-  (select-frame-set-input-focus emacs-anywhere--frame))
+    ;; Focus the frame
+    (select-frame-set-input-focus frame)))
 
 (defun emacs-anywhere--setup-buffer ()
   "Set up the emacs-anywhere buffer."
@@ -122,15 +121,16 @@ MOUSE-X and MOUSE-Y are the cursor position for frame placement."
 (defun emacs-anywhere-finish ()
   "Save the buffer, notify Hammerspoon, and close the frame."
   (interactive)
-  (when emacs-anywhere--current-file
-    ;; Save the file
-    (save-buffer)
+  (let ((file (frame-parameter nil 'emacs-anywhere-file)))
+    (when file
+      ;; Save the file
+      (save-buffer)
 
-    ;; Notify Hammerspoon to paste the content
-    (emacs-anywhere--notify-hammerspoon)
+      ;; Notify Hammerspoon to paste the content
+      (emacs-anywhere--notify-hammerspoon)
 
-    ;; Clean up
-    (emacs-anywhere--cleanup)))
+      ;; Clean up
+      (emacs-anywhere--cleanup))))
 
 (defun emacs-anywhere-abort ()
   "Abort editing without saving."
@@ -142,24 +142,26 @@ MOUSE-X and MOUSE-Y are the cursor position for frame placement."
 
 (defun emacs-anywhere--notify-hammerspoon ()
   "Tell Hammerspoon to paste the content back."
-  (let ((cmd (format "%s -c 'spoon.EmacsAnywhere:finish()'"
-                     emacs-anywhere-hs-path)))
+  (let* ((file (frame-parameter nil 'emacs-anywhere-file))
+         (bundle-id (frame-parameter nil 'emacs-anywhere-bundle-id))
+         (cmd (format "%s -c 'spoon.EmacsAnywhere:finish(\"%s\", \"%s\")'"
+                      emacs-anywhere-hs-path
+                      file
+                      bundle-id)))
     (call-process-shell-command cmd nil 0)))
 
 (defun emacs-anywhere--notify-hammerspoon-abort ()
   "Tell Hammerspoon to refocus original app without pasting."
-  (let ((cmd (format "%s -c 'spoon.EmacsAnywhere:abort()'"
-                     emacs-anywhere-hs-path)))
+  (let* ((bundle-id (frame-parameter nil 'emacs-anywhere-bundle-id))
+         (cmd (format "%s -c 'spoon.EmacsAnywhere:abort(\"%s\")'"
+                      emacs-anywhere-hs-path
+                      bundle-id)))
     (call-process-shell-command cmd nil 0)))
 
 (defun emacs-anywhere--cleanup ()
   "Clean up the emacs-anywhere state."
   (let ((buf (current-buffer))
-        (frame emacs-anywhere--frame))
-
-    ;; Reset state
-    (setq emacs-anywhere--current-file nil)
-    (setq emacs-anywhere--frame nil)
+        (frame (selected-frame)))
 
     ;; Mark buffer as unmodified to skip confirmation (only this buffer)
     (with-current-buffer buf
@@ -167,7 +169,7 @@ MOUSE-X and MOUSE-Y are the cursor position for frame placement."
 
     ;; Kill buffer and frame
     (kill-buffer buf)
-    (when (and frame (frame-live-p frame))
+    (when (frame-live-p frame)
       (delete-frame frame))))
 
 (provide 'emacs-anywhere)
