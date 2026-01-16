@@ -1,0 +1,104 @@
+---
+# Workflow to rebuild Spoons automatically
+
+name: PR
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "**.lua"
+
+permissions:
+  contents: write
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Only run this if we're on the official repo. This prevents forks from getting super confusing with commits. If you want to host you own Spoon repository, consider re-enabling this, but for your repo.
+    if: github.repository == 'nohzafk/emacs-anywhere' || github.repository == 'offbyone/emacs-anywhere'
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Check-out the Spoons PR
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+        with:
+          persist-credentials: false
+
+      # Install just
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff #v3
+        with:
+          just-version: "1.44"
+
+      # Check-out the Hammerspoon repository we need for doc building
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+        with:
+          repository: Hammerspoon/hammerspoon
+          path: hammerspoon
+          persist-credentials: false
+
+      # Build zips and collect info about new ones before committing
+      - name: Build and collect spoon zips
+        id: build-zips
+        run: |
+          # Build all spoons
+          just
+
+          # Collect list of built zips for artifact upload
+          BUILT_ZIPS=""
+          while IFS= read -r SPOON; do
+            if [ -f "Spoons/${SPOON}.spoon.zip" ]; then
+              BUILT_ZIPS="${BUILT_ZIPS}Spoons/${SPOON}.spoon.zip "
+            fi
+          done <<< "${SPOONS}"
+
+          if [ -n "$BUILT_ZIPS" ]; then
+            echo "has_zips=true" >> $GITHUB_OUTPUT
+            echo "zip_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$BUILT_ZIPS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "Built spoon zips: $BUILT_ZIPS"
+          else
+            echo "has_zips=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Upload spoon zips as PR artifacts (before committing them)
+      - name: Upload spoon artifacts
+        if: github.event_name == 'pull_request' && steps.build-zips.outputs.has_zips == 'true'
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b #v4.5.0
+        with:
+          name: spoon-packages
+          path: ${{ steps.build-zips.outputs.zip_files }}
+          if-no-files-found: warn
+          retention-days: 90
+
+      # Commit changes (only on push to main)
+      - name: Commit spoon zips
+        if: github.event_name == 'push' && steps.build-zips.outputs.has_zips == 'true'
+        env:
+          CHANGED_DIRS: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          git config --global user.email "spoonbot@github.com"
+          git config --global user.name "Spoons GitHub Bot"
+
+          SPOONS=$(echo "$CHANGED_DIRS" | tr ' ' '\n' | grep "^Source/.*\.spoon$" | sed -e 's#^Source/\(.*\).spoon$#\1#' | sort | uniq)
+
+          while IFS= read -r SPOON; do
+            git add Spoons/${SPOON}.spoon.zip
+            git commit -m "Add binary package for ${SPOON}."
+          done <<< "${SPOONS}"
+
+      # Push changes (only on push to main)
+      - name: Push changes
+        uses: ad-m/github-push-action@77c5b412c50b723d2a4fbc6d71fb5723bcd439aa #master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+        if: github.event_name == 'push' && steps.build-zips.outputs.has_zips == 'true'

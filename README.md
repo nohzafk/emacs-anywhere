@@ -69,11 +69,37 @@ Grant Accessibility permission: **System Settings → Privacy & Security → Acc
 
 ### 2. Install the Spoon
 
+#### From Source
+
 Clone this repository and symlink (or copy) the Spoon:
 
 ```bash
 git clone https://github.com/nohzafk/emacs-anywhere.git
 ln -s ~/path/to/emacs-anywhere/EmacsAnywhere.spoon ~/.hammerspoon/Spoons/
+```
+
+#### With SpoonInstall
+
+Add this as a custom Spoons repository:
+
+``` lua
+hs.loadSpoon("SpoonInstall")
+spoon.SpoonInstall.use_syncinstall = true
+spoon.SpoonInstall.repos.emacsanywhere = {
+  url = "https://github.com/nohzafk/emacs-anywhere",
+  desc = "EmacsAnywhere spoon",
+  branch = "main",
+}
+Install = spoon.SpoonInstall
+```
+
+``` lua
+Install:andUse("EmacsAnywhere", {
+                 repo = "emacsanywhere",
+                 hotkeys = {
+                   toggle = {{"ctrl"}, "f8"}  -- Ctrl+F8
+                 }
+})
 ```
 
 ### 3. Configure Hammerspoon
