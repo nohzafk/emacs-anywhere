@@ -191,12 +191,17 @@ surfaced as a side effect of NSApp activation."
       (emacs-anywhere--cleanup))))
 
 (defun emacs-anywhere-abort ()
-  "Abort editing without saving."
+  "Abort editing without saving, and delete the temp file."
   (interactive)
-  ;; Notify Hammerspoon to refocus original app (without pasting)
-  (emacs-anywhere--notify-hammerspoon-abort)
-  ;; Clean up
-  (emacs-anywhere--cleanup))
+  (let ((file (frame-parameter nil 'emacs-anywhere-file)))
+    ;; Notify Hammerspoon to refocus original app (without pasting)
+    (emacs-anywhere--notify-hammerspoon-abort)
+    ;; Clean up
+    (emacs-anywhere--cleanup)
+    ;; On finish Hammerspoon deletes the file after reading it; on abort
+    ;; nothing reads it, so it is deleted here.
+    (when (and file (file-exists-p file))
+      (delete-file file))))
 
 (defun emacs-anywhere--notify-hammerspoon ()
   "Tell Hammerspoon to paste the content back."
