@@ -178,6 +178,12 @@ The header line shows the target app and available keybindings:
 -- Custom emacsclient path (default: /opt/homebrew/bin/emacsclient)
 spoon.EmacsAnywhere.emacsclient = "/usr/local/bin/emacsclient"
 
+-- Extra emacsclient arguments (default: none), passed to every call. Use
+-- them when emacsclient does not find your server by default: a TCP server
+-- (server-use-tcp) needs its server file, a named server its socket name.
+spoon.EmacsAnywhere.emacsclientArgs = { "-f", "~/.emacs.d/server/server" }
+-- spoon.EmacsAnywhere.emacsclientArgs = { "-s", "work" }
+
 -- Custom temp directory (default: /tmp/emacs-anywhere)
 spoon.EmacsAnywhere.tmpdir = "/tmp/my-emacs-anywhere"
 
@@ -189,8 +195,9 @@ spoon.EmacsAnywhere.ensureEmacs = function(callback)
   callback()
 end
 
--- Optional: run emacsclient yourself, e.g. to set environment variables or a
--- socket name. Call callback(exitCode, stdOut, stdErr) when it finishes.
+-- Optional: run emacsclient yourself, e.g. to set environment variables.
+-- args already include emacsclientArgs. Call callback(exitCode, stdOut,
+-- stdErr) when it finishes.
 spoon.EmacsAnywhere.runEmacsclient = function(args, callback)
   hs.task.new(spoon.EmacsAnywhere.emacsclient, callback, args):start()
 end
@@ -253,6 +260,8 @@ Add `require("hs.ipc")` to your `~/.hammerspoon/init.lua` before loading the spo
 ### "Emacs server not running!"
 
 Start the Emacs server with `M-x server-start` or add `(server-start)` to your config.
+
+If the server is running but uses TCP (`server-use-tcp`) or a custom `server-name`, `emacsclient` does not find it without help. Set `emacsclientArgs` to `{ "-f", "<server file>" }` or `{ "-s", "<name>" }`; see [Configuration](#hammerspoon).
 
 ### Emacs frame doesn't appear
 

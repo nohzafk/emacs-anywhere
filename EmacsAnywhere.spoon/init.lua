@@ -17,14 +17,21 @@ obj.tmpdir = "/tmp/emacs-anywhere"
 obj.emacsclient = "/opt/homebrew/bin/emacsclient"
 obj.yabai = "/opt/homebrew/bin/yabai"
 
+-- Extra arguments passed to every emacsclient call, before the Spoon's own.
+-- Use them to reach a server that emacsclient does not find by default, e.g.
+-- { "-f", "~/.emacs.d/server/server" } for a TCP server or { "-s", "work" }
+-- for a named socket. A leading ~ is expanded to the home directory.
+obj.emacsclientArgs = {}
+
 -- Optional: function(callback) that makes sure an Emacs server is reachable,
 -- then calls callback(). Set it to start Emacs on demand. When nil, the Spoon
 -- checks for a running server and shows an alert if there is none.
 obj.ensureEmacs = nil
 
 -- Optional: function(args, callback) that runs emacsclient with args and calls
--- callback(exitCode, stdOut, stdErr). Set it to supply environment variables
--- or a socket name. When nil, the Spoon runs obj.emacsclient directly.
+-- callback(exitCode, stdOut, stdErr). Set it to supply environment variables.
+-- args already include obj.emacsclientArgs. When nil, the Spoon runs
+-- obj.emacsclient directly.
 obj.runEmacsclient = nil
 
 -- State
@@ -93,7 +100,14 @@ end
 --- Method
 --- Check if Emacs server is running
 function obj:checkServer()
-  local cmd = "TERM=xterm-256color " .. self.emacsclient .. " -e '(+ 1 1)' 2>&1"
+  local function quote(arg)
+    return "'" .. arg:gsub("'", "'\\''") .. "'"
+  end
+  local words = { "TERM=xterm-256color", quote(self.emacsclient) }
+  for _, arg in ipairs(self:_emacsclientArgs({ "-e", "(+ 1 1)" })) do
+    table.insert(words, quote(arg))
+  end
+  local cmd = table.concat(words, " ") .. " 2>&1"
   local handle = io.popen(cmd)
   local output = handle:read("*a")
   handle:close()
@@ -104,6 +118,23 @@ function obj:checkServer()
 
   -- If server is running, output should be "2"
   return output == "2"
+end
+
+-- obj.emacsclientArgs, with a leading ~ expanded, followed by args.
+function obj:_emacsclientArgs(args)
+  local home = os.getenv("HOME")
+  local result = {}
+  for _, arg in ipairs(self.emacsclientArgs or {}) do
+    if home then
+      arg = arg:gsub("^~/", home .. "/")
+      if arg == "~" then arg = home end
+    end
+    table.insert(result, arg)
+  end
+  for _, arg in ipairs(args) do
+    table.insert(result, arg)
+  end
+  return result
 end
 
 -- Call callback once an Emacs server is reachable.
@@ -121,6 +152,7 @@ end
 
 -- Run emacsclient with args; callback(exitCode, stdOut, stdErr).
 function obj:_runEmacsclient(args, callback)
+  args = self:_emacsclientArgs(args)
   if self.runEmacsclient then
     return self.runEmacsclient(args, callback)
   end
