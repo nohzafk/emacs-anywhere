@@ -208,11 +208,17 @@ end
 The elisp is automatically loaded from the Spoon - no need to add anything to your `load-path`. To customize, just set these variables directly in your Emacs config:
 
 ```elisp
-;; Custom frame size (position is overridden by mouse location)
+;; Frame parameters: size, font, alpha, ... (default: 80x20)
 (setq emacs-anywhere-frame-parameters
       '((name . "emacs-anywhere")
         (width . 80)
         (height . 20)))
+
+;; Where the frame opens (default: mouse)
+;;   mouse      - top-left corner at the mouse pointer
+;;   center     - centered on the monitor the mouse pointer is on
+;;   parameters - `top' and `left' from emacs-anywhere-frame-parameters
+(setq emacs-anywhere-frame-position 'center)
 
 ;; Hammerspoon CLI path (default: nil, which finds `hs` on exec-path,
 ;; then in /opt/homebrew/bin and /usr/local/bin)

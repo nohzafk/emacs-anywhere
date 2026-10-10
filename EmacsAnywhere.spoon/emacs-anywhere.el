@@ -49,12 +49,41 @@ and /usr/local/bin (where `hs.ipc.cliInstall' puts it by default)."
 (defcustom emacs-anywhere-frame-parameters
   '((name . "emacs-anywhere")
     (width . 80)
-    (height . 20)
-    (top . 100)
-    (left . 100))
-  "Frame parameters for the emacs-anywhere frame."
+    (height . 20))
+  "Frame parameters for the emacs-anywhere frame.
+`top' and `left' are used only when `emacs-anywhere-frame-position'
+is `parameters'."
   :type 'alist
   :group 'emacs-anywhere)
+
+(defcustom emacs-anywhere-frame-position 'mouse
+  "Where the emacs-anywhere frame opens.
+`mouse' puts its top-left corner at the mouse pointer.  `center'
+centers it on the monitor the mouse pointer is on.  `parameters'
+uses `top' and `left' from `emacs-anywhere-frame-parameters'."
+  :type '(choice (const :tag "At the mouse pointer" mouse)
+                 (const :tag "Centered on the mouse's monitor" center)
+                 (const :tag "From emacs-anywhere-frame-parameters" parameters))
+  :group 'emacs-anywhere)
+
+(defun emacs-anywhere--monitor-workarea (x y)
+  "Return the workarea (X Y WIDTH HEIGHT) of the monitor containing X, Y.
+Falls back to the selected frame's monitor."
+  (alist-get 'workarea
+             (or (seq-find
+                  (lambda (m)
+                    (pcase-let ((`(,mx ,my ,mw ,mh) (alist-get 'geometry m)))
+                      (and x y (<= mx x) (< x (+ mx mw)) (<= my y) (< y (+ my mh)))))
+                  (display-monitor-attributes-list))
+                 (frame-monitor-attributes))))
+
+(defun emacs-anywhere--center-frame (frame x y)
+  "Center FRAME on the workarea of the monitor containing X, Y."
+  (pcase-let ((`(,wx ,wy ,ww ,wh) (emacs-anywhere--monitor-workarea x y)))
+    (set-frame-position
+     frame
+     (+ wx (max 0 (/ (- ww (frame-outer-width frame)) 2)))
+     (+ wy (max 0 (/ (- wh (frame-outer-height frame)) 2))))))
 
 (defcustom emacs-anywhere-major-mode #'text-mode
   "Major mode to use for emacs-anywhere buffers."
@@ -145,22 +174,35 @@ surfaced as a side effect of NSApp activation."
   (when emacs-hidden
     (emacs-anywhere--park-frames))
   (let* ((snapshot (emacs-anywhere--snapshot-frame-visibility))
+         (position emacs-anywhere-frame-position)
+         ;; `make-frame' uses the first entry for a parameter, so the
+         ;; entries computed here win over the user's.
          (frame-params
           (append
-           `((name . ,(or (cdr (assq 'name emacs-anywhere-frame-parameters))
-                          "emacs-anywhere"))
-             ;; Force a NS graphic frame; without this, `make-frame' called
+           `(;; Force a NS graphic frame; without this, `make-frame' called
              ;; from a daemon falls back to a TTY frame and errors with
              ;; "Unknown terminal type".
              (window-system . ns)
-             (width  . ,(or (cdr (assq 'width  emacs-anywhere-frame-parameters)) 80))
-             (height . ,(or (cdr (assq 'height emacs-anywhere-frame-parameters)) 20))
              (emacs-anywhere-file      . ,file)
              (emacs-anywhere-app       . ,(or app-name "Unknown"))
              (emacs-anywhere-bundle-id . ,(or app-bundle-id app-name)))
-           (when mouse-x `((left . ,mouse-x)))
-           (when mouse-y `((top  . ,mouse-y)))))
+           (pcase position
+             ;; Created invisible and shown once centered, so the frame
+             ;; never appears at one place and then jumps to another.
+             ('center '((visibility . nil)))
+             ('parameters nil)
+             (_ (append (when mouse-x `((left . ,mouse-x)))
+                        (when mouse-y `((top  . ,mouse-y))))))
+           (if (eq position 'parameters)
+               emacs-anywhere-frame-parameters
+             (seq-remove (lambda (p) (memq (car-safe p) '(left top)))
+                         emacs-anywhere-frame-parameters))
+           '((name . "emacs-anywhere") (width . 80) (height . 20))))
          (frame (make-frame frame-params)))
+
+    (when (eq position 'center)
+      (emacs-anywhere--center-frame frame mouse-x mouse-y)
+      (make-frame-visible frame))
 
     (select-frame frame)
     (raise-frame frame)
