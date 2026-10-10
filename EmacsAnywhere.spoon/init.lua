@@ -17,6 +17,16 @@ obj.tmpdir = "/tmp/emacs-anywhere"
 obj.emacsclient = "/opt/homebrew/bin/emacsclient"
 obj.yabai = "/opt/homebrew/bin/yabai"
 
+-- Optional: function(callback) that makes sure an Emacs server is reachable,
+-- then calls callback(). Set it to start Emacs on demand. When nil, the Spoon
+-- checks for a running server and shows an alert if there is none.
+obj.ensureEmacs = nil
+
+-- Optional: function(args, callback) that runs emacsclient with args and calls
+-- callback(exitCode, stdOut, stdErr). Set it to supply environment variables
+-- or a socket name. When nil, the Spoon runs obj.emacsclient directly.
+obj.runEmacsclient = nil
+
 -- State
 obj.hotkey = nil
 -- Note: previousApp and currentTmpFile are no longer stored globally
@@ -96,6 +106,29 @@ function obj:checkServer()
   return output == "2"
 end
 
+-- Call callback once an Emacs server is reachable.
+function obj:_ensureEmacs(callback)
+  if self.ensureEmacs then
+    return self.ensureEmacs(callback)
+  end
+  if not self:checkServer() then
+    hs.alert.show("Emacs server not running!\nStart with M-x server-start", 3)
+    print("[EmacsAnywhere] Error: Emacs server not running")
+    return
+  end
+  callback()
+end
+
+-- Run emacsclient with args; callback(exitCode, stdOut, stdErr).
+function obj:_runEmacsclient(args, callback)
+  if self.runEmacsclient then
+    return self.runEmacsclient(args, callback)
+  end
+  local task = hs.task.new(self.emacsclient, callback, args)
+  task:start()
+  return task
+end
+
 --- EmacsAnywhere:start()
 --- Method
 --- Capture text and open in Emacs
@@ -107,14 +140,8 @@ function obj:start()
     return
   end
 
-  -- Check if Emacs server is running
-  if not self:checkServer() then
-    hs.alert.show("Emacs server not running!\nStart with M-x server-start", 3)
-    print("[EmacsAnywhere] Error: Emacs server not running")
-    return
-  end
-
-  -- Save the current application info
+  -- Capture caller context now, before any wait for Emacs, so the frontmost
+  -- app and the selection are the ones at the moment the hotkey was pressed.
   local currentApp = hs.application.frontmostApplication()
   local appName = currentApp:name()
   local appBundleID = currentApp:bundleID() or appName  -- Fallback to name if no bundle ID
@@ -160,44 +187,50 @@ function obj:start()
 
     -- Build the elisp command that creates the emacs-anywhere frame
     -- Pass both app name (for display) and bundle ID (for reliable lookup)
-    local elispCmd = string.format(
-      '(progn (load "%s") (emacs-anywhere-open "%s" "%s" "%s" %d %d))',
-      elispFile,
-      self.currentTmpFile,
-      appName,
-      appBundleID,
-      mouseX,
-      mouseY
-    )
+    local elispTemplate =
+      '(progn (load "%s") (emacs-anywhere-open "%s" "%s" "%s" %d %d %s))'
 
-    -- Run emacsclient asynchronously to support concurrent sessions
-    -- emacsclient options:
-    --   -n (--no-wait): Return immediately, don't wait for frame to close
-    --                   This enables multiple concurrent emacs-anywhere sessions
-    --   -c (--create-frame): Create a new GUI frame (establishes display context)
-    --                        The elisp code configures this frame with custom parameters
-    --   -e (--eval): Evaluate the following elisp expression
-    -- Note: No -a flag - daemon must be running (managed by launchd or user)
-    local task = hs.task.new(
-      self.emacsclient,
-      function(exitCode, stdOut, stdErr)
-        -- Callback when emacsclient completes (non-blocking)
+    -- Activating a hidden Emacs (Cmd-H) unhides it, which shows every one of
+    -- its frames, so the elisp is told to park the other frames first. Read
+    -- after ensureEmacs, which may just have launched Emacs.
+    local function emacsHidden()
+      local emacs = hs.application.get("org.gnu.Emacs")
+      return emacs ~= nil and emacs:isHidden()
+    end
+
+    self:_ensureEmacs(function()
+      local elispCmd = string.format(
+        elispTemplate,
+        elispFile,
+        self.currentTmpFile,
+        appName,
+        appBundleID,
+        mouseX,
+        mouseY,
+        emacsHidden() and "t" or "nil"
+      )
+
+      -- emacsclient options:
+      --   -n (--no-wait): Return immediately, don't wait for frame to close
+      --                   This enables multiple concurrent emacs-anywhere sessions
+      --   -e (--eval): Evaluate the following elisp expression
+      -- No -c: emacs-anywhere-open creates the frame itself, so it can record
+      -- the other frames' visibility before the new frame activates Emacs.
+      self:_runEmacsclient({ "-n", "-e", elispCmd }, function(exitCode, stdOut, stdErr)
         if exitCode ~= 0 then
           local output = stdErr ~= "" and stdErr or stdOut
           print("[EmacsAnywhere] Error: " .. output:gsub("%s+$", ""))
           hs.alert.show("Failed to open Emacs!\n" .. output:gsub("%s+$", ""), 3)
         end
-      end,
-      {"-n", "-c", "-e", elispCmd}
-    )
-    task:start()
-
-    -- Use yabai to focus the emacs-anywhere window (fixes focus issue with yabai)
-    if self:isYabaiRunning() then
-      hs.timer.doAfter(0.1, function()
-        self:focusEmacsAnywhereWindow()
       end)
-    end
+
+      -- Use yabai to focus the emacs-anywhere window (fixes focus issue with yabai)
+      if self:isYabaiRunning() then
+        hs.timer.doAfter(0.1, function()
+          self:focusEmacsAnywhereWindow()
+        end)
+      end
+    end)
   end)
 end
 

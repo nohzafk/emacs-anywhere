@@ -68,41 +68,99 @@ Provides keybindings and a hook for customization."
                 (format " → %s  |  C-c C-c: finish  |  C-c C-k: abort"
                         (or (frame-parameter nil 'emacs-anywhere-app) "Unknown")))))
 
-(defun emacs-anywhere-open (file &optional app-name app-bundle-id mouse-x mouse-y)
+(defun emacs-anywhere--snapshot-frame-visibility ()
+  "Return an alist of (FRAME . VISIBILITY) for every existing frame."
+  (mapcar (lambda (f) (cons f (frame-visible-p f))) (frame-list)))
+
+(defun emacs-anywhere--restore-frame-visibility (snapshot new-frame)
+  "Restore visibility of frames in SNAPSHOT, leaving NEW-FRAME alone.
+NSApp activation on macOS surfaces hidden/iconified frames when a new
+frame is created.  This reverts each frame to its prior state."
+  (dolist (cell snapshot)
+    (let ((f (car cell))
+          (vis (cdr cell)))
+      (when (and (frame-live-p f) (not (eq f new-frame)))
+        (pcase vis
+          ('icon (iconify-frame f))
+          ('nil  (make-frame-invisible f t)))))))
+
+(defvar emacs-anywhere--parked-frames nil
+  "Frames made invisible because Emacs was hidden when a session opened.
+Unhiding an app on macOS shows every one of its windows, so while Emacs
+is hidden the other frames are ordered out before activation.  The last
+session to close puts them back and hides Emacs again.")
+
+(defun emacs-anywhere--session-frames ()
+  "Return the live emacs-anywhere frames."
+  (filtered-frame-list
+   (lambda (f) (frame-parameter f 'emacs-anywhere-file))))
+
+(defun emacs-anywhere--park-frames ()
+  "Make every visible graphic non-anywhere frame invisible and remember it.
+Terminal frames, such as a daemon's initial frame, are left alone."
+  (dolist (f (frame-list))
+    (when (and (eq (frame-visible-p f) t)
+               (display-graphic-p f)
+               (not (frame-parameter f 'emacs-anywhere-file)))
+      (push f emacs-anywhere--parked-frames)
+      (make-frame-invisible f t))))
+
+(defun emacs-anywhere--unpark-frames ()
+  "Hide Emacs, then make the parked frames visible again.
+Hiding first keeps the restored frames from appearing on screen; they
+come back the next time Emacs itself is activated."
+  (when emacs-anywhere--parked-frames
+    (when (fboundp 'ns-hide-emacs)
+      (ns-hide-emacs t))
+    (dolist (f emacs-anywhere--parked-frames)
+      (when (frame-live-p f)
+        (make-frame-visible f)))
+    (setq emacs-anywhere--parked-frames nil)))
+
+(defun emacs-anywhere-open (file &optional app-name app-bundle-id mouse-x mouse-y
+                                 emacs-hidden)
   "Open FILE in a new frame for editing.
 APP-NAME is the name of the source application (for display).
 APP-BUNDLE-ID is the bundle ID of the source application (for reliable lookup).
-MOUSE-X and MOUSE-Y are the cursor position for frame placement."
-  ;; Use the frame created by emacsclient -c (don't create a new one)
-  ;; Just configure it with our desired parameters
-  (let ((frame (selected-frame)))
-    ;; Store state in frame parameters (not global variables) to support concurrent sessions
-    (set-frame-parameter frame 'emacs-anywhere-file file)
-    (set-frame-parameter frame 'emacs-anywhere-app (or app-name "Unknown"))
-    (set-frame-parameter frame 'emacs-anywhere-bundle-id (or app-bundle-id app-name))
+MOUSE-X and MOUSE-Y are the cursor position for frame placement.
+EMACS-HIDDEN non-nil means the Emacs app is hidden (Cmd-H); its other
+frames are then parked so that activation shows only the new frame.
 
-    ;; Set frame parameters (name, size, position)
-    (set-frame-parameter frame 'name "emacs-anywhere")
-    (set-frame-parameter frame 'width
-                         (or (cdr (assq 'width emacs-anywhere-frame-parameters)) 80))
-    (set-frame-parameter frame 'height
-                         (or (cdr (assq 'height emacs-anywhere-frame-parameters)) 20))
-    (when mouse-x
-      (set-frame-parameter frame 'left mouse-x))
-    (when mouse-y
-      (set-frame-parameter frame 'top mouse-y))
+Snapshots existing frames' visibility before creating the new frame and
+restores it shortly after, so that minimized or hidden frames are not
+surfaced as a side effect of NSApp activation."
+  (when emacs-hidden
+    (emacs-anywhere--park-frames))
+  (let* ((snapshot (emacs-anywhere--snapshot-frame-visibility))
+         (frame-params
+          (append
+           `((name . ,(or (cdr (assq 'name emacs-anywhere-frame-parameters))
+                          "emacs-anywhere"))
+             ;; Force a NS graphic frame; without this, `make-frame' called
+             ;; from a daemon falls back to a TTY frame and errors with
+             ;; "Unknown terminal type".
+             (window-system . ns)
+             (width  . ,(or (cdr (assq 'width  emacs-anywhere-frame-parameters)) 80))
+             (height . ,(or (cdr (assq 'height emacs-anywhere-frame-parameters)) 20))
+             (emacs-anywhere-file      . ,file)
+             (emacs-anywhere-app       . ,(or app-name "Unknown"))
+             (emacs-anywhere-bundle-id . ,(or app-bundle-id app-name)))
+           (when mouse-x `((left . ,mouse-x)))
+           (when mouse-y `((top  . ,mouse-y)))))
+         (frame (make-frame frame-params)))
 
     (select-frame frame)
     (raise-frame frame)
 
-    ;; Open the file
-    (find-file file)
+    (with-selected-frame frame
+      (find-file file)
+      (emacs-anywhere--setup-buffer))
 
-    ;; Set up the buffer
-    (emacs-anywhere--setup-buffer)
+    (select-frame-set-input-focus frame)
 
-    ;; Focus the frame
-    (select-frame-set-input-focus frame)))
+    (run-at-time 0.05 nil
+                 #'emacs-anywhere--restore-frame-visibility
+                 snapshot frame)))
 
 (defun emacs-anywhere--setup-buffer ()
   "Set up the emacs-anywhere buffer."
@@ -166,6 +224,11 @@ MOUSE-X and MOUSE-Y are the cursor position for frame placement."
     ;; Mark buffer as unmodified to skip confirmation (only this buffer)
     (with-current-buffer buf
       (set-buffer-modified-p nil))
+
+    ;; Restore parked frames before deleting this one: deleting the sole
+    ;; visible frame is an error.
+    (when (equal (emacs-anywhere--session-frames) (list frame))
+      (emacs-anywhere--unpark-frames))
 
     ;; Kill buffer and frame
     (kill-buffer buf)

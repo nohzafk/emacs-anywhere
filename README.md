@@ -155,6 +155,20 @@ spoon.EmacsAnywhere.emacsclient = "/usr/local/bin/emacsclient"
 
 -- Custom temp directory (default: /tmp/emacs-anywhere)
 spoon.EmacsAnywhere.tmpdir = "/tmp/my-emacs-anywhere"
+
+-- Optional: start Emacs on demand instead of requiring a running server.
+-- Call callback() once emacsclient can reach the server. When unset, the
+-- Spoon checks for a server and shows an alert if there is none.
+spoon.EmacsAnywhere.ensureEmacs = function(callback)
+  -- launch Emacs, wait for (server-running-p), then:
+  callback()
+end
+
+-- Optional: run emacsclient yourself, e.g. to set environment variables or a
+-- socket name. Call callback(exitCode, stdOut, stdErr) when it finishes.
+spoon.EmacsAnywhere.runEmacsclient = function(args, callback)
+  hs.task.new(spoon.EmacsAnywhere.emacsclient, callback, args):start()
+end
 ```
 
 ### Emacs
@@ -254,16 +268,16 @@ If Hammerspoon can't read selected text or simulate keystrokes:
 1. **Trigger**: Hammerspoon hotkey calls `EmacsAnywhere:start()`
 2. **Capture**: Selected text is read via `AXSelectedText` accessibility attribute, app name and bundle ID are saved
 3. **Temp file**: Text is written to `/tmp/emacs-anywhere/<app>-<timestamp>-<random>.txt`
-4. **Emacs**: `emacsclient -n -c -e` evaluates `(emacs-anywhere-open ...)` with:
+4. **Emacs**: `emacsclient -n -e` evaluates `(emacs-anywhere-open ...)` with:
    - `-n`: Non-blocking, returns immediately (enables concurrent sessions)
-   - `-c`: Creates GUI frame (establishes display context for daemon)
-   - File path, app name (display), bundle ID (lookup), mouse coordinates
-5. **Frame state**: Each frame stores its own state in frame parameters (not global variables)
-6. **Edit**: Emacs configures the frame at mouse position and opens the temp file
-7. **Finish**: `C-c C-c` saves file, calls `hs -c 'spoon.EmacsAnywhere:finish("<file>", "<bundle-id>")'`
-8. **App lookup**: Hammerspoon finds target app by bundle ID (reliable, unique identifier)
-9. **Paste**: Reads file, saves clipboard, pastes content via `Cmd+V`, restores clipboard
-10. **Cleanup**: Temp file and frame are deleted
+   - File path, app name (display), bundle ID (lookup), mouse coordinates, and whether Emacs is hidden
+5. **Frame**: The elisp creates the frame itself with `make-frame`, after recording which of its other frames are visible, so it can put minimized and invisible frames back afterwards
+6. **Frame state**: Each frame stores its own state in frame parameters (not global variables)
+7. **Edit**: Emacs opens the temp file in the new frame at the mouse position
+8. **Finish**: `C-c C-c` saves file, calls `hs -c 'spoon.EmacsAnywhere:finish("<file>", "<bundle-id>")'`
+9. **App lookup**: Hammerspoon finds target app by bundle ID (reliable, unique identifier)
+10. **Paste**: Reads file, saves clipboard, pastes content via `Cmd+V`, restores clipboard
+11. **Cleanup**: Temp file and frame are deleted
 
 ### Concurrent sessions
 
@@ -272,6 +286,15 @@ Multiple emacs-anywhere sessions can run simultaneously:
 - Frame parameters store session-specific state (file path, app bundle ID)
 - Sessions are independent and don't interfere with each other
 - Closing one session doesn't affect others
+
+### When Emacs is hidden
+
+On macOS, activating a hidden app (Cmd-H) unhides it, and that shows every
+one of its windows. So when Emacs is hidden at the moment you press the
+hotkey, the elisp makes its other frames invisible before the new frame
+takes focus, and only the emacs-anywhere frame appears. When the last
+session closes, Emacs is hidden again and those frames are made visible,
+so they come back the next time you switch to Emacs.
 
 ## License
 
