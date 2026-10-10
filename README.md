@@ -207,7 +207,8 @@ The elisp is automatically loaded from the Spoon - no need to add anything to yo
         (width . 80)
         (height . 20)))
 
-;; Custom Hammerspoon CLI path (default: /opt/homebrew/bin/hs)
+;; Hammerspoon CLI path (default: nil, which finds `hs` on exec-path,
+;; then in /opt/homebrew/bin and /usr/local/bin)
 (setq emacs-anywhere-hs-path "/usr/local/bin/hs")
 
 ;; Custom major mode (default: text-mode)
@@ -264,6 +265,10 @@ Start the Emacs server with `M-x server-start` or add `(server-start)` to your c
 2. Verify the path in Hammerspoon config matches your `emacsclient` location.
 
 ### Hammerspoon CLI not working
+
+Symptom: `C-c C-c` saves the file and closes the frame, but nothing is pasted. Emacs
+shows an `emacs-anywhere:` message in the echo area (and in `*Messages*`) when it cannot
+find or run `hs`.
 
 1. Test it:
 

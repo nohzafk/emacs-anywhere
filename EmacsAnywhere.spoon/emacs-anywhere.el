@@ -23,15 +23,28 @@
 
 ;;; Code:
 
+(require 'seq)
+(require 'subr-x)
+
 (defgroup emacs-anywhere nil
   "Edit text from anywhere in Emacs."
   :group 'convenience
   :prefix "emacs-anywhere-")
 
-(defcustom emacs-anywhere-hs-path "/opt/homebrew/bin/hs"
-  "Path to Hammerspoon CLI."
-  :type 'string
+(defcustom emacs-anywhere-hs-path nil
+  "Path to the Hammerspoon CLI, or nil to find it.
+When nil, `hs' is looked up on `exec-path', then in /opt/homebrew/bin
+and /usr/local/bin (where `hs.ipc.cliInstall' puts it by default)."
+  :type '(choice (const :tag "Find automatically" nil) file)
   :group 'emacs-anywhere)
+
+(defun emacs-anywhere--hs-path ()
+  "Return the Hammerspoon CLI to run, or nil if there is none."
+  (seq-find (lambda (f) (and f (file-executable-p f)))
+            (list emacs-anywhere-hs-path
+                  (executable-find "hs")
+                  "/opt/homebrew/bin/hs"
+                  "/usr/local/bin/hs")))
 
 (defcustom emacs-anywhere-frame-parameters
   '((name . "emacs-anywhere")
@@ -203,23 +216,48 @@ surfaced as a side effect of NSApp activation."
     (when (and file (file-exists-p file))
       (delete-file file))))
 
+(defun emacs-anywhere--call-hammerspoon (lua what)
+  "Run LUA in Hammerspoon through its CLI, reporting failure.
+WHAT describes the call for the error message.  The CLI runs
+asynchronously; a missing CLI or a non-zero exit is shown as a message
+instead of being dropped."
+  (let ((hs (emacs-anywhere--hs-path)))
+    (if (not hs)
+        (message "emacs-anywhere: Hammerspoon CLI `hs' not found, could not %s. \
+Run hs.ipc.cliInstall() in Hammerspoon or set `emacs-anywhere-hs-path'" what)
+      (let ((buf (generate-new-buffer " *emacs-anywhere-hs*")))
+        ;; `hs -c' runs the code, then keeps reading stdin until EOF.
+        (process-send-eof
+         (make-process
+          :name "emacs-anywhere-hs"
+          :buffer buf
+          :command (list hs "-c" lua)
+          :connection-type 'pipe
+          :noquery t
+          :sentinel
+          (lambda (proc _event)
+            (unless (process-live-p proc)
+              (unless (zerop (process-exit-status proc))
+                (message "emacs-anywhere: %s -c failed (exit %d), could not %s: %s"
+                         hs (process-exit-status proc) what
+                         (with-current-buffer buf
+                           (string-trim (buffer-string)))))
+              (kill-buffer buf)))))))))
+
 (defun emacs-anywhere--notify-hammerspoon ()
   "Tell Hammerspoon to paste the content back."
-  (let* ((file (frame-parameter nil 'emacs-anywhere-file))
-         (bundle-id (frame-parameter nil 'emacs-anywhere-bundle-id))
-         (cmd (format "%s -c 'spoon.EmacsAnywhere:finish(\"%s\", \"%s\")'"
-                      emacs-anywhere-hs-path
-                      file
-                      bundle-id)))
-    (call-process-shell-command cmd nil 0)))
+  (let ((file (frame-parameter nil 'emacs-anywhere-file))
+        (bundle-id (frame-parameter nil 'emacs-anywhere-bundle-id)))
+    (emacs-anywhere--call-hammerspoon
+     (format "spoon.EmacsAnywhere:finish(%S, %S)" file bundle-id)
+     (format "paste back (text kept in %s)" file))))
 
 (defun emacs-anywhere--notify-hammerspoon-abort ()
   "Tell Hammerspoon to refocus original app without pasting."
-  (let* ((bundle-id (frame-parameter nil 'emacs-anywhere-bundle-id))
-         (cmd (format "%s -c 'spoon.EmacsAnywhere:abort(\"%s\")'"
-                      emacs-anywhere-hs-path
-                      bundle-id)))
-    (call-process-shell-command cmd nil 0)))
+  (let ((bundle-id (frame-parameter nil 'emacs-anywhere-bundle-id)))
+    (emacs-anywhere--call-hammerspoon
+     (format "spoon.EmacsAnywhere:abort(%S)" bundle-id)
+     "refocus the original app")))
 
 (defun emacs-anywhere--cleanup ()
   "Clean up the emacs-anywhere state."
