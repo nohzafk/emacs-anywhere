@@ -69,11 +69,36 @@ Grant Accessibility permission: **System Settings → Privacy & Security → Acc
 
 ### 2. Install the Spoon
 
+#### From source
+
 Clone this repository and symlink (or copy) the Spoon:
 
 ```bash
 git clone https://github.com/nohzafk/emacs-anywhere.git
 ln -s ~/path/to/emacs-anywhere/EmacsAnywhere.spoon ~/.hammerspoon/Spoons/
+```
+
+#### With SpoonInstall
+
+Add this repository to [SpoonInstall](https://www.hammerspoon.org/Spoons/SpoonInstall.html) and let it install and load the Spoon. This replaces `hs.loadSpoon` and `bindHotkeys` in step 3; you still need `require("hs.ipc")`.
+
+```lua
+require("hs.ipc")
+
+hs.loadSpoon("SpoonInstall")
+spoon.SpoonInstall.use_syncinstall = true
+spoon.SpoonInstall.repos.emacsanywhere = {
+  url = "https://github.com/nohzafk/emacs-anywhere",
+  desc = "EmacsAnywhere spoon",
+  branch = "main",
+}
+
+spoon.SpoonInstall:andUse("EmacsAnywhere", {
+  repo = "emacsanywhere",
+  hotkeys = {
+    toggle = {{"ctrl"}, "f8"}  -- Ctrl+F8
+  },
+})
 ```
 
 ### 3. Configure Hammerspoon
@@ -295,6 +320,10 @@ hotkey, the elisp makes its other frames invisible before the new frame
 takes focus, and only the emacs-anywhere frame appears. When the last
 session closes, Emacs is hidden again and those frames are made visible,
 so they come back the next time you switch to Emacs.
+
+## Development
+
+`Spoons/EmacsAnywhere.spoon.zip` is what SpoonInstall downloads. After changing anything in `EmacsAnywhere.spoon/`, run `scripts/build-spoon-zip.sh` and commit the zip with the change; CI fails when the zip and the source disagree.
 
 ## License
 
