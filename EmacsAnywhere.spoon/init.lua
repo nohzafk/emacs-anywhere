@@ -192,22 +192,6 @@ function obj:start()
   end
 
   hs.timer.doAfter(0.05, function()
-    -- Ensure temp directory exists
-    os.execute("mkdir -p " .. self.tmpdir)
-
-    -- Generate unique temp file name
-    local safeName = appName:gsub("[^%w]", "-"):lower()
-    local timestamp = os.time()
-    local random = math.random(10000, 99999)
-    self.currentTmpFile = string.format("%s/%s-%d-%d.txt", self.tmpdir, safeName, timestamp, random)
-
-    -- Write to temp file
-    local f = io.open(self.currentTmpFile, "w")
-    if f then
-      f:write(text)
-      f:close()
-    end
-
     -- Get mouse position for frame placement
     local mousePos = hs.mouse.absolutePosition()
     local mouseX = math.floor(mousePos.x)
@@ -231,6 +215,19 @@ function obj:start()
     end
 
     self:_ensureEmacs(function()
+      -- The temp file is written only once Emacs is ready: an ensureEmacs
+      -- that gives up never calls back, and nothing would delete the file.
+      os.execute("mkdir -p " .. self.tmpdir)
+      local safeName = appName:gsub("[^%w]", "-"):lower()
+      local timestamp = os.time()
+      local random = math.random(10000, 99999)
+      self.currentTmpFile = string.format("%s/%s-%d-%d.txt", self.tmpdir, safeName, timestamp, random)
+      local f = io.open(self.currentTmpFile, "w")
+      if f then
+        f:write(text)
+        f:close()
+      end
+
       local elispCmd = string.format(
         elispTemplate,
         elispFile,
