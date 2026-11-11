@@ -105,6 +105,10 @@ Provides keybindings and a hook for customization."
   (when emacs-anywhere-mode
     ;; Don't add trailing newline - paste back exactly what user typed
     (setq-local require-final-newline nil)
+    ;; The buffer is a short-lived temp file: no auto-save files, and no
+    ;; saves behind the user's back from `auto-save-visited-mode'.
+    (auto-save-mode -1)
+    (setq-local auto-save-visited-mode nil)
     ;; Show help in header line (get app from frame parameter)
     (setq-local header-line-format
                 (format " → %s  |  C-c C-c: finish  |  C-c C-k: abort"
